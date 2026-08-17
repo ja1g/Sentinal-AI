@@ -89,10 +89,6 @@ def get_trend(prices, short_period=5, long_period=20):
 
 
 def get_timeframe_prices(history, minutes):
-    """
-    Samples the full history into candles/points of approximately
-    the requested timeframe.
-    """
     if not history:
         return []
 
@@ -131,10 +127,9 @@ def get_sentinel_verdict(rsi, trends, change_15, change_60):
         score -= 10
         reasons.append("bearish confirmation across timeframes")
 
-    # Main 1-minute trend
+    # Main 1-minute trend and RSI
     main_trend = trends["1m"]
 
-    # RSI in context
     if rsi is not None:
         if main_trend == "BULLISH":
             if rsi < 35:
@@ -151,7 +146,7 @@ def get_sentinel_verdict(rsi, trends, change_15, change_60):
                 reasons.append("bullish market becoming overextended")
             else:
                 score -= 15
-                reasons.append("extremely overbought — do not chase")
+                reasons.append("extremely overbought - do not chase")
 
         elif main_trend == "BEARISH":
             if rsi > 65:
@@ -162,7 +157,7 @@ def get_sentinel_verdict(rsi, trends, change_15, change_60):
                 reasons.append("bearish momentum remains in control")
             elif rsi < 30:
                 score += 5
-                reasons.append("oversold — possible bounce")
+                reasons.append("oversold - possible bounce")
 
     # Momentum confirmation
     if change_15 is not None:
@@ -183,9 +178,15 @@ def get_sentinel_verdict(rsi, trends, change_15, change_60):
 
     score = max(0, min(100, score))
 
-    # Final verdict
-    if bullish_count >= 3 and rsi is not None and rsi > 80:
-        verdict = "BULLISH — WAIT FOR PULLBACK"
+    # Final verdict - do not confirm a trade signal while data is incomplete
+    if "COLLECTING" in trends.values():
+        verdict = "PRELIMINARY - COLLECTING DATA"
+        reasons.insert(
+            0,
+            "full signal not confirmed yet - one or more timeframes still collecting"
+        )
+    elif bullish_count >= 3 and rsi is not None and rsi > 80:
+        verdict = "BULLISH - WAIT FOR PULLBACK"
     elif score >= 80:
         verdict = "STRONG BUY SETUP"
     elif score >= 65:
@@ -244,25 +245,23 @@ while True:
                 movements[label] = None
                 print(f"{label} movement: Waiting for data")
 
-        # 1-minute data
+        # Multi-timeframe price data
         prices_1m = [row["price"] for row in history]
-
-        # Multi-timeframe sampled data
         prices_5m = get_timeframe_prices(history, 5)
         prices_15m = get_timeframe_prices(history, 15)
         prices_60m = get_timeframe_prices(history, 60)
 
-        # RSI from 1-minute data
+        # RSI
         rsi = calculate_rsi(prices_1m)
 
-        # Trends from each timeframe
+        # Trends
         trends = {}
-
         trends["1m"], _, _ = get_trend(prices_1m)
         trends["5m"], _, _ = get_trend(prices_5m)
         trends["15m"], _, _ = get_trend(prices_15m)
         trends["1h"], _, _ = get_trend(prices_60m)
 
+        # Sentinel analysis
         score, verdict, reasons = get_sentinel_verdict(
             rsi,
             trends,
@@ -271,7 +270,6 @@ while True:
         )
 
         print("\n--- MULTI-TIMEFRAME INTELLIGENCE ---")
-
         print(f"RSI (1m): {rsi:.1f}" if rsi is not None else "RSI: Collecting")
         print()
         print(f"1m Trend:  {trends['1m']}")
@@ -290,7 +288,7 @@ while True:
 
         print("=" * 60)
 
-        # Only alert for genuinely strong setups
+        # Only alert for genuinely confirmed strong setups
         if verdict in ["STRONG BUY SETUP", "STRONG SELL / AVOID"]:
             message = (
                 f"{verdict} | Score: {score}/100 | "
